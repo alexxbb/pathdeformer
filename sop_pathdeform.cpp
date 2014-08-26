@@ -10,6 +10,7 @@
 #include <GA/GA_Detail.h>
 #include <GU/GU_Prim.h>
 #include <UT/UT_Vector.h>
+#include <UT/UT_Array.h>
 #include <GA/GA_PrimitiveFamilyMask.h>
 #include <OP/OP_OperatorTable.h>
 #include <GEO/GEO_Primitive.h>
@@ -17,6 +18,7 @@
 #include <GEO/GEO_PrimType.h>
 #include <GEO/GEO_Curve.h>
 #include <GU/GU_Curve.h>
+#include <PRM/PRM_Include.h>
 #include <SYS/SYS_Math.h>
 #include "sop_pathdeform.h"
 
@@ -40,6 +42,11 @@ PathDeform::~PathDeform() {};
 static PRM_Name useUpVector("use_up_vector", "Use Up-Vector");
 static PRM_Name useCurveTwist("use_curve_twist", "Use Twist Attribute");
 static PRM_Name useCurveWidth("use_curve_width", "Scale By Width Attribute");
+static PRM_Name stretch("stretch", "Stretch");
+static PRM_Name stretch_tolen("stretch_to_len", "Stretch To Length");
+static PRM_Name vecAttribs("vattribs", "Vector Attributes");
+
+static PRM_Range stretchRange(PRM_RANGE_RESTRICTED, -1, PRM_RANGE_UI, 2);
 
 PRM_Template
 PathDeform::parmsTemplatesList[] =
@@ -48,6 +55,9 @@ PathDeform::parmsTemplatesList[] =
 	PRM_Template(PRM_XYZ, 3, &PRMupVectorName, PRMyaxisDefaults),
 	PRM_Template(PRM_TOGGLE_E, 1, &useCurveTwist, PRMoneDefaults),
 	PRM_Template(PRM_TOGGLE_E, 1, &useCurveWidth, PRMoneDefaults),
+    PRM_Template(PRM_TOGGLE_E, 1, &stretch_tolen, PRMzeroDefaults),
+    PRM_Template(PRM_FLT_J, 1, &stretch, PRMzeroDefaults, 0, &stretchRange),
+    PRM_Template(PRM_STRING, 1, &vecAttribs, 0),
 	PRM_Template(PRM_FLT_J, 1, &PRMoffsetName, PRMzeroDefaults),
 	PRM_Template(),
 };
@@ -58,6 +68,7 @@ PathDeform::updateParmsFlags()
 	bool changes = false;
 //	changes |= enableParm(PRMupVectorName.getToken(), !PARM_USENORMALS());
 	changes |= setVisibleState(PRMupVectorName.getToken(), PARM_USEUPVECTOR());
+    changes |= enableParm(stretch.getToken(), !PARM_STRETCH_TOLEN());
 	return changes;
 }
 
@@ -187,6 +198,7 @@ PathDeform::cookMySop(OP_Context &context)
 
 	// Parms
 	int use_width = PARM_USEWIDTH();
+    int stretch_tolen = PARM_STRETCH_TOLEN();
 	// Curve attributes
 	aref_curve_tang = curve_gdp->addFloatTuple(GA_ATTRIB_POINT, "tang", 3);
 	aref_curve_btang = curve_gdp->addFloatTuple(GA_ATTRIB_POINT, "btang", 3);
@@ -209,16 +221,37 @@ PathDeform::cookMySop(OP_Context &context)
 	unsigned int curve_num_points = geocurve_prim->getPointRange().getEntries();
 
 	// Main
-	// Attribs
 	GA_RWPageHandleV3 hndl_geo_p = gdp->getP();
 	UT_BoundingBox bbox;
 	gdp->getBBox(&bbox);
-	float object_sizez = bbox.sizeZ();
-	float segment_length = arclen / curve_num_points;
-	float step = object_sizez / segment_length; // how many cuve points in object length
 	// Find object z axis
 	UT_Vector3 axis_pt0, axis_pt1;
 	computeBboxAxis(bbox, axis_pt0, axis_pt1);
+    float stretch_mult;
+	float object_sizez = bbox.sizeZ();
+    if (stretch_tolen)
+        stretch_mult = arclen / object_sizez;
+    else
+        stretch_mult = (1.0 - PARM_STRETCH(time) * -1);
+	object_sizez *= stretch_mult;
+	float segment_length = arclen / curve_num_points;
+	float step = object_sizez / segment_length; // how many cuve points in object length
+
+    // Attribs to reorient
+    UT_String vecattribs;
+    UT_Array<GA_Attribute *> vattribs_array;
+    PARM_REORIENT_ATTRIBS(vecattribs);
+    if (vecattribs.isstring())
+    {
+        GA_RWAttributeRef aref;
+        aref = gdp->findFloatTuple(GA_ATTRIB_POINT, vecattribs);
+        if(aref.isValid())
+        {
+        	vattribs_array.append(aref.getAttribute());
+        	cout << "Attrib: " << vecattribs << " added" << endl;
+        }
+    }
+
 	// Deform
 	UT_Vector3D nextCurveP, prevCurveP, lerpCurveP;
 	UT_Vector3D nextCurveTang, prevCurveTang, lerpCurveTang;
@@ -293,8 +326,6 @@ PathDeform::cookMySop(OP_Context &context)
 		}
 
 	}
-//	gdp->clearAndDestroy();
-//	gdp->copy(*curve_gdp);
 	unlockInputs();
 	return error();
 }

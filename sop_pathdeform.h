@@ -45,10 +45,13 @@ private:
 	int PARM_USEUPVECTOR() {return evalInt("use_up_vector", 0, 0);}
 	int PARM_USETWIST() {return evalInt("use_curve_twist", 0, 0);}
 	int PARM_USEWIDTH() {return evalInt("use_curve_width", 0, 0);}
+	int PARM_STRETCH_TOLEN() {return evalInt("stretch_to_len", 0, 0);}
 	fpreal PARM_UPX(fpreal t) { return evalFloat("upvector", 0, t); }
 	fpreal PARM_UPY(fpreal t) { return evalFloat("upvector", 1, t); }
 	fpreal PARM_UPZ(fpreal t) { return evalFloat("upvector", 2, t); }
 	float PARM_OFFSET(fpreal t) {return evalFloat("offset",  0, t); }
+	float PARM_STRETCH(fpreal t) {return evalFloat("stretch",  0, t); }
+    void PARM_REORIENT_ATTRIBS(UT_String &str) {evalString(str, "vattribs", 0, 0);}
 
 };
 
