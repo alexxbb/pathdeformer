@@ -48,7 +48,7 @@ static PRM_Name useCurveWidth("use_curve_width", "Scale By Width Attribute");
 static PRM_Name stretch("stretch", "Stretch");
 static PRM_Name stretch_tolen("stretch_to_len", "Stretch To Length");
 static PRM_Name vecAttribs("vattribs", "Vector Attributes");
-static PRM_Name transformVattribs("transform_vattribs", "Transform Vector Attributes");
+static PRM_Name deformVattribs("deform_vattribs", "Deform Vector Attributes");
 static PRM_Name recompute_normals("recompute_n", "Recompute Point Normals");
 
 static PRM_Range stretchRange(PRM_RANGE_RESTRICTED, -1, PRM_RANGE_UI, 2);
@@ -63,7 +63,7 @@ PathDeform::parmsTemplatesList[] =
 	PRM_Template(PRM_TOGGLE_E, 1, &recompute_normals, PRMzeroDefaults),
     PRM_Template(PRM_TOGGLE_E, 1, &stretch_tolen, PRMzeroDefaults),
     PRM_Template(PRM_FLT_J, 1, &stretch, PRMzeroDefaults, 0, &stretchRange),
-	PRM_Template(PRM_TOGGLE_E, 1, &transformVattribs, PRMzeroDefaults),
+	PRM_Template(PRM_TOGGLE_E, 1, &deformVattribs, PRMzeroDefaults),
     PRM_Template(PRM_STRING, 1, &vecAttribs, 0),
 	PRM_Template(PRM_FLT_J, 1, &PRMoffsetName, PRMzeroDefaults),
 	PRM_Template(),
@@ -76,7 +76,7 @@ PathDeform::updateParmsFlags()
 //	changes |= enableParm(PRMupVectorName.getToken(), !PARM_USENORMALS());
 	changes |= setVisibleState(PRMupVectorName.getToken(), PARM_USEUPVECTOR());
     changes |= enableParm(stretch.getToken(), !PARM_STRETCH_TOLEN());
-    changes |= enableParm(vecAttribs.getToken(), PARM_TRANSFORM_VECTORS());
+    changes |= enableParm(vecAttribs.getToken(), PARM_DEFORM_VECTORS());
 	return changes;
 }
 
@@ -208,6 +208,7 @@ PathDeform::cookMySop(OP_Context &context)
 	int use_width = PARM_USEWIDTH();
     int stretch_tolen = PARM_STRETCH_TOLEN();
     int recompute_n = PARM_COMPUTE_N();
+    int deform_vattribs = PARM_DEFORM_VECTORS();
 	// Curve attributes
 	aref_curve_tang = curve_gdp->addFloatTuple(GA_ATTRIB_POINT, "tang", 3);
 	aref_curve_btang = curve_gdp->addFloatTuple(GA_ATTRIB_POINT, "btang", 3);
@@ -253,7 +254,7 @@ PathDeform::cookMySop(OP_Context &context)
 
     // Vector Attribs to reorient
     GA_AttributeRefMap aref_vecattribs((GA_Detail &)gdp);
-    if (PARM_TRANSFORM_VECTORS())
+    if (PARM_DEFORM_VECTORS())
     {
     	UT_String vecattribs_str;
     	PARM_REORIENT_ATTRIBS(vecattribs_str);
@@ -330,8 +331,7 @@ PathDeform::cookMySop(OP_Context &context)
         	// Comstruct coordinate system
         	UT_Matrix3D curve_basis(lerpCurveBtang[0], lerpCurveBtang[1], lerpCurveBtang[2],
         			lerpCurveUp[0], lerpCurveUp[1], lerpCurveUp[2],
-        			lerpCurveTang[0], lerpCurveTang[1], lerpCurveTang[2]);
-
+        			-lerpCurveTang[0], -lerpCurveTang[1], -lerpCurveTang[2]);
 
         	projection_direction *= curve_basis;
         	if (use_width && hndl_curve_width.isValid())
@@ -346,7 +346,7 @@ PathDeform::cookMySop(OP_Context &context)
         	lerpCurveP += projection_direction;
         	hndl_geo_p.set(ptof, lerpCurveP);
 
-        	if (PARM_TRANSFORM_VECTORS())
+        	if (deform_vattribs)
         	{
         		if (aref_vecattribs.entries() > 0)
         		{
@@ -361,6 +361,8 @@ PathDeform::cookMySop(OP_Context &context)
 	}
     if (recompute_n && hndl_geo_n.isValid())
     	gdp->normal();
+//    gdp->clearAndDestroy();
+//    gdp->copy(*curve_gdp);
 	unlockInputs();
 	return error();
 }

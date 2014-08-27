@@ -52,7 +52,7 @@ private:
 	float PARM_OFFSET(fpreal t) {return evalFloat("offset",  0, t); }
 	float PARM_STRETCH(fpreal t) {return evalFloat("stretch",  0, t); }
     void PARM_REORIENT_ATTRIBS(UT_String &str) {evalString(str, "vattribs", 0, 0);}
-    int PARM_TRANSFORM_VECTORS() {return evalInt("transform_vattribs", 0, 0);}
+    int PARM_DEFORM_VECTORS() {return evalInt("deform_vattribs", 0, 0);}
     int PARM_COMPUTE_N() {return evalInt("recompute_n", 0, 0);}
 
 };
