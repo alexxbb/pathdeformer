@@ -304,13 +304,14 @@ PathDeform::cookMySop(OP_Context &context)
 
 	// Deform
 	UT_Vector3D nextCurveP, prevCurveP, lerpCurveP;
-	UT_Vector3D nextCurveTang, prevCurveTang, lerpCurveTang;
-	UT_Vector3D nextCurveBtang, prevCurveBtang, lerpCurveBtang;
+	UT_Vector3D nextCurveT, prevCurveT, lerpCurveT;
+	UT_Vector3D nextCurveBT, prevCurveBT, lerpCurveBT;
 	UT_Vector3D nextCurveUp, prevCurveUp, lerpCurveUp;
 	UT_Vector3  projection_point, projection_direction;
     GA_Offset curve_offset;
     GA_Offset block_offset_start, block_offset_end;
 	GA_IndexMap curveIndexMap = curve_gdp->getIndexMap(GA_ATTRIB_POINT);
+	UT_Matrix3D curve_basis;
 	for(GA_Iterator it(gdp->getPointRange()); it.blockAdvance(block_offset_start, block_offset_end);)
 	{
 		hndl_geo_p.setPage(block_offset_start);
@@ -338,38 +339,41 @@ PathDeform::cookMySop(OP_Context &context)
         	// Previous point
         	curve_offset = curveIndexMap.offsetFromIndex(next_curve_pointnum);
         	nextCurveP = hndl_curve_p.get(curve_offset);
-        	nextCurveTang = hndl_curve_tang.get(curve_offset);
-        	nextCurveBtang = hndl_curve_btang.get(curve_offset);
+        	nextCurveT = hndl_curve_tang.get(curve_offset);
+        	nextCurveBT = hndl_curve_btang.get(curve_offset);
         	nextCurveUp = hndl_curve_up.get(curve_offset);
 
         	// Next point
         	curve_offset = curveIndexMap.offsetFromIndex(prev_curve_pointnum);
         	prevCurveP = hndl_curve_p.get(curve_offset);
-        	prevCurveTang = hndl_curve_tang.get(curve_offset);
-        	prevCurveBtang = hndl_curve_btang.get(curve_offset);
+        	prevCurveT = hndl_curve_tang.get(curve_offset);
+        	prevCurveBT = hndl_curve_btang.get(curve_offset);
         	prevCurveUp = hndl_curve_up.get(curve_offset);
 
         	// Interpolated values
         	lerpCurveP = lerp(nextCurveP, prevCurveP, 1 - fraction);
-        	lerpCurveTang = lerp(nextCurveTang, prevCurveTang, 1 - fraction);
-        	lerpCurveBtang = lerp(nextCurveBtang, prevCurveBtang, 1 - fraction);
+        	lerpCurveT = lerp(nextCurveT, prevCurveT, 1 - fraction);
+        	lerpCurveBT = lerp(nextCurveBT, prevCurveBT, 1 - fraction);
         	lerpCurveUp = lerp(nextCurveUp, prevCurveUp, 1 - fraction);
 
         	// Comstruct coordinate system
-        	UT_Matrix3D curve_basis(lerpCurveBtang[0], lerpCurveBtang[1], lerpCurveBtang[2],
-        			lerpCurveUp[0], lerpCurveUp[1], lerpCurveUp[2],
-        			-lerpCurveTang[0], -lerpCurveTang[1], -lerpCurveTang[2]);
 
         	switch (axis)
         	{
         		case 0:
-        			curve_basis.rotate(lerpCurveUp, rad90);
+        			curve_basis = UT_Matrix3D(lerpCurveT[0], lerpCurveT[1], lerpCurveT[2],
+        							lerpCurveUp[0], lerpCurveUp[1], lerpCurveUp[2],
+        							-lerpCurveBT[0], -lerpCurveBT[1], -lerpCurveBT[2]);
         			break;
         		case 1:
-        			curve_basis.rotate(lerpCurveUp, rad90);
-        			curve_basis.rotate(lerpCurveBtang, rad90);
+        			curve_basis = UT_Matrix3D(lerpCurveUp[0], lerpCurveUp[1], lerpCurveUp[2],
+        							lerpCurveT[0], lerpCurveT[1], lerpCurveT[2],
+        							lerpCurveBT[0], lerpCurveBT[1], lerpCurveBT[2]);
         			break;
         		case 2:
+        			curve_basis = UT_Matrix3D(lerpCurveBT[0], lerpCurveBT[1], lerpCurveBT[2],
+        							lerpCurveUp[0], lerpCurveUp[1], lerpCurveUp[2],
+        							-lerpCurveT[0], -lerpCurveT[1], -lerpCurveT[2]);
         			break;
         	}
         	projection_direction *= curve_basis;
