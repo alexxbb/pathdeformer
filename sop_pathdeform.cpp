@@ -363,7 +363,7 @@ PathDeform::cookMySop(OP_Context &context)
         	switch (axis)
         	{
         		case 0:
-        			curve_basis.rotate(lerpCurveUp, -rad90);
+        			curve_basis.rotate(lerpCurveUp, rad90);
         			break;
         		case 1:
         			curve_basis.rotate(lerpCurveUp, rad90);
