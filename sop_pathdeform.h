@@ -26,6 +26,8 @@ public:
 protected:
 	OP_ERROR cookMySop(OP_Context &context);
 	virtual bool updateParmsFlags();
+	void computeBboxAxis(const int &axis, UT_Vector3 &pt0, UT_Vector3 &pt1);
+	float pointRelativeToBbox(const UT_Vector3 &pt, const int &axis);
 
 private:
 	GA_RWAttributeRef aref_curve_tang;
@@ -46,14 +48,18 @@ private:
 	int PARM_USETWIST() {return evalInt("use_curve_twist", 0, 0);}
 	int PARM_USEWIDTH() {return evalInt("use_curve_width", 0, 0);}
 	int PARM_STRETCH_TOLEN() {return evalInt("stretch_to_len", 0, 0);}
+	int PARM_AXIS() {return evalInt(PRMaxisName.getToken(), 0, 0); }
 	fpreal PARM_UPX(fpreal t) { return evalFloat("upvector", 0, t); }
 	fpreal PARM_UPY(fpreal t) { return evalFloat("upvector", 1, t); }
 	fpreal PARM_UPZ(fpreal t) { return evalFloat("upvector", 2, t); }
 	float PARM_OFFSET(fpreal t) {return evalFloat("offset",  0, t); }
+	float PARM_ROLL(fpreal t) {return evalFloat("roll",  0, t); }
 	float PARM_STRETCH(fpreal t) {return evalFloat("stretch",  0, t); }
     void PARM_REORIENT_ATTRIBS(UT_String &str) {evalString(str, "vattribs", 0, 0);}
     int PARM_DEFORM_VECTORS() {return evalInt("deform_vattribs", 0, 0);}
     int PARM_COMPUTE_N() {return evalInt("recompute_n", 0, 0);}
+
+    UT_Vector3 bbox_min, bbox_max;
 
 };
 

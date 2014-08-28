@@ -56,6 +56,7 @@ static PRM_Range stretchRange(PRM_RANGE_RESTRICTED, -1, PRM_RANGE_UI, 2);
 PRM_Template
 PathDeform::parmsTemplatesList[] =
 {
+	PRM_Template(PRM_ORD, 1, &PRMaxisName, PRMtwoDefaults, &PRMaxisMenu),
 	PRM_Template(PRM_TOGGLE_E, 1, &useUpVector, PRMzeroDefaults),
 	PRM_Template(PRM_XYZ, 3, &PRMupVectorName, PRMyaxisDefaults),
 	PRM_Template(PRM_TOGGLE_E, 1, &useCurveTwist, PRMoneDefaults),
@@ -66,6 +67,7 @@ PathDeform::parmsTemplatesList[] =
 	PRM_Template(PRM_TOGGLE_E, 1, &deformVattribs, PRMzeroDefaults),
     PRM_Template(PRM_STRING, 1, &vecAttribs, 0),
 	PRM_Template(PRM_FLT_J, 1, &PRMoffsetName, PRMzeroDefaults),
+	PRM_Template(PRM_FLT_J, 1, &PRMrollName, PRMzeroDefaults),
 	PRM_Template(),
 };
 
@@ -82,11 +84,9 @@ PathDeform::updateParmsFlags()
 
 
 float
-pointRelativeToBbox(UT_BoundingBox &bbox, const UT_Vector3 &pt, const int &axis = 2)
+PathDeform::pointRelativeToBbox(const UT_Vector3 &pt, const int &axis)
 {
-	UT_Vector3 min = bbox.minvec();
-	UT_Vector3 max = bbox.maxvec();
-	return SYSfit(pt[axis], min[axis], max[axis], 0, 1);
+	return SYSfit(pt[axis], bbox_min[axis], bbox_max[axis], 0, 1);
 }
 
 double
@@ -107,24 +107,39 @@ lerp(UT_Vector3D &a, UT_Vector3D &b, float weight)
 }
 
 void
-computeBboxAxis(UT_BoundingBox &bbox, UT_Vector3 &pt0, UT_Vector3 &pt1)
+PathDeform::computeBboxAxis(const int &axis, UT_Vector3 &pt0, UT_Vector3 &pt1)
 {
-	UT_Vector3 min, max;
-	min = bbox.minvec();
-	max = bbox.maxvec();
-	float x = min[0] + max[0];
-	float y = min[1] + max[1];
-
-	pt0.assign(x, y, min[2]);
-	pt1.assign(x, y, max[2]);
-
+	float x,y;
+	switch (axis)
+	{
+	case 0:
+		x = bbox_min[2] + bbox_max[2];
+		y = bbox_min[1] + bbox_max[1];
+		pt0.assign(bbox_min[axis], x, y);
+		pt1.assign(bbox_max[axis], x, y);
+		break;
+	case 1:
+		x = bbox_min[0] + bbox_max[0];
+		y = bbox_min[2] + bbox_max[2];
+		pt0.assign(x, bbox_min[axis], y);
+		pt1.assign(x, bbox_max[axis], y);
+		break;
+	case 2:
+		x = bbox_min[0] + bbox_max[0];
+		y = bbox_min[1] + bbox_max[1];
+		pt0.assign(x, y, bbox_min[axis]);
+		pt1.assign(x, y, bbox_max[axis]);
+		break;
+	}
 }
 
 void
 PathDeform::computeCurveAttributes(const GEO_Curve *curve_prim, fpreal time)
 {
 	int use_curve_twist = PARM_USETWIST();
+	float roll_parm = PARM_ROLL(time);
 	UT_Vector3 prevP, curP, nextP, tang, btang, up, avg_normal;
+	float roll_angle;
 
 	if (PARM_USEUPVECTOR())
 		avg_normal.assign(PARM_UPX(time), PARM_UPY(time), PARM_UPZ(time));
@@ -135,6 +150,7 @@ PathDeform::computeCurveAttributes(const GEO_Curve *curve_prim, fpreal time)
 	short int npts = curve_prim->getPointRange().getEntries();
 	for(GA_Iterator it(curve_prim->getPointRange()); !it.atEnd(); it.advance())
 	{
+		roll_angle = 0.0;
 		GA_Offset ptof = it.getOffset();
         curP = hndl_curve_p.get(ptof);
         if (ptof == curve_prim->getPointOffset(0)) // first point
@@ -159,9 +175,13 @@ PathDeform::computeCurveAttributes(const GEO_Curve *curve_prim, fpreal time)
         btang.normalize();
 		up = cross(btang, tang);
 
-		if (use_curve_twist && hndl_curve_twist.isValid())
+		if (use_curve_twist || roll_parm > 0.0)
 		{
-			UT_QuaternionD quat(SYSdegToRad(hndl_curve_twist.get(ptof)), tang);
+			if (use_curve_twist && hndl_curve_twist.isValid())
+				roll_angle = hndl_curve_twist.get(ptof);
+			if (roll_parm > 0.0)
+				roll_angle += roll_parm * 360.0;
+            UT_QuaternionD quat(SYSdegToRad(roll_angle), tang);
 			btang = quat.rotate(btang);
 			up = quat.rotate(up);
 		}
@@ -209,6 +229,8 @@ PathDeform::cookMySop(OP_Context &context)
     int stretch_tolen = PARM_STRETCH_TOLEN();
     int recompute_n = PARM_COMPUTE_N();
     int deform_vattribs = PARM_DEFORM_VECTORS();
+    int axis = PARM_AXIS();
+    float offset = PARM_OFFSET(time);
 	// Curve attributes
 	aref_curve_tang = curve_gdp->addFloatTuple(GA_ATTRIB_POINT, "tang", 3);
 	aref_curve_btang = curve_gdp->addFloatTuple(GA_ATTRIB_POINT, "btang", 3);
@@ -234,23 +256,29 @@ PathDeform::cookMySop(OP_Context &context)
     GA_RWPageHandleV3 hndl_geo_n;
 	GA_RWPageHandleV3 hndl_geo_p = gdp->getP();
 	GA_RWAttributeRef aref_geo_n = gdp->findNormalAttribute(GA_ATTRIB_POINT);
+	GA_RWPageHandleV3 _tmp = gdp->addFloatTuple(GA_ATTRIB_POINT, "tmp", 3).getAttribute();
 	if (aref_geo_n.isValid())
         hndl_geo_n = aref_geo_n.getAttribute();
 
 	UT_BoundingBox bbox;
-	gdp->getBBox(&bbox);
-	// Find object z axis
 	UT_Vector3 axis_pt0, axis_pt1;
-	computeBboxAxis(bbox, axis_pt0, axis_pt1);
+	gdp->getBBox(&bbox);
+	bbox_min = bbox.minvec();
+	bbox_max = bbox.maxvec();
+	computeBboxAxis(axis, axis_pt0, axis_pt1);
+	UT_Vector3 axis_vector = axis_pt1 - axis_pt0;
+	axis_vector.normalize();
+
     float stretch_mult;
-	float object_sizez = bbox.sizeZ();
+	float object_axis_size = bbox.sizeAxis(axis);
     if (stretch_tolen)
-        stretch_mult = arclen / object_sizez;
+        stretch_mult = arclen / object_axis_size;
     else
         stretch_mult = (1.0 - PARM_STRETCH(time) * -1);
-	object_sizez *= stretch_mult;
+	object_axis_size *= stretch_mult;
 	float segment_length = arclen / curve_num_points;
-	float step = object_sizez / segment_length; // how many cuve points in object length
+	float step = object_axis_size / segment_length; // how many cuve points in object length
+    float rad90 = SYSdegToRad(90);
 
     // Vector Attribs to reorient
     GA_AttributeRefMap aref_vecattribs((GA_Detail &)gdp);
@@ -287,11 +315,10 @@ PathDeform::cookMySop(OP_Context &context)
 	{
 		hndl_geo_p.setPage(block_offset_start);
 		hndl_geo_n.setPage(block_offset_start);
+		_tmp.setPage(block_offset_start);
 		for (GA_Offset ptof = block_offset_start; ptof < block_offset_end; ptof++)
 		{
 			// Find point projection on object axis
-			UT_Vector3 axis_vector = axis_pt1 - axis_pt0;
-			axis_vector.normalize();
 			UT_Vector3 t0 = hndl_geo_p.get(ptof) - axis_pt0;
 			float t0_len = t0.length();
 			t0.normalize();
@@ -299,9 +326,9 @@ PathDeform::cookMySop(OP_Context &context)
 			float projection = angle * t0_len;
 			projection_point = axis_pt0 + axis_vector * projection;
 			projection_direction = hndl_geo_p.get(ptof) - projection_point;
-        	float bbox_relpos = pointRelativeToBbox(bbox, hndl_geo_p.get(ptof), 2);
+        	float bbox_relpos = pointRelativeToBbox(hndl_geo_p.get(ptof), axis);
         	float u_position_on_curve = bbox_relpos * step;
-        	u_position_on_curve += PARM_OFFSET(time) * (curve_num_points - 1);
+        	u_position_on_curve += offset * (curve_num_points - 1);
 
         	unsigned int next_curve_pointnum = SYSmin(SYSceil(u_position_on_curve), (float) curve_num_points - 1);
         	unsigned int prev_curve_pointnum = SYSmin(SYSfloor(u_position_on_curve), (float) curve_num_points - 1);
@@ -333,7 +360,20 @@ PathDeform::cookMySop(OP_Context &context)
         			lerpCurveUp[0], lerpCurveUp[1], lerpCurveUp[2],
         			-lerpCurveTang[0], -lerpCurveTang[1], -lerpCurveTang[2]);
 
+        	switch (axis)
+        	{
+        		case 0:
+        			curve_basis.rotate(lerpCurveUp, -rad90);
+        			break;
+        		case 1:
+        			curve_basis.rotate(lerpCurveUp, rad90);
+        			curve_basis.rotate(lerpCurveBtang, rad90);
+        			break;
+        		case 2:
+        			break;
+        	}
         	projection_direction *= curve_basis;
+        	_tmp.set(ptof, projection_direction);
         	if (use_width && hndl_curve_width.isValid())
         	{
         		double w1, w2;
