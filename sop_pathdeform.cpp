@@ -23,6 +23,7 @@
 #include <GU/GU_Curve.h>
 #include <PRM/PRM_Include.h>
 #include <SYS/SYS_Math.h>
+#include <UT/UT_Vector3.h>
 #include "sop_pathdeform.h"
 
 
@@ -62,10 +63,10 @@ PathDeform::parmsTemplatesList[] =
 	PRM_Template(PRM_TOGGLE_E, 1, &useCurveTwist, PRMoneDefaults),
 	PRM_Template(PRM_TOGGLE_E, 1, &useCurveWidth, PRMoneDefaults),
 	PRM_Template(PRM_TOGGLE_E, 1, &recompute_normals, PRMzeroDefaults),
-    PRM_Template(PRM_TOGGLE_E, 1, &stretch_tolen, PRMzeroDefaults),
-    PRM_Template(PRM_FLT_J, 1, &stretch, PRMzeroDefaults, 0, &stretchRange),
 	PRM_Template(PRM_TOGGLE_E, 1, &deformVattribs, PRMzeroDefaults),
     PRM_Template(PRM_STRING, 1, &vecAttribs, 0),
+    PRM_Template(PRM_TOGGLE_E, 1, &stretch_tolen, PRMzeroDefaults),
+    PRM_Template(PRM_FLT_J, 1, &stretch, PRMzeroDefaults, 0, &stretchRange),
 	PRM_Template(PRM_FLT_J, 1, &PRMoffsetName, PRMzeroDefaults),
 	PRM_Template(PRM_FLT_J, 1, &PRMrollName, PRMzeroDefaults),
 	PRM_Template(),
@@ -89,22 +90,6 @@ PathDeform::pointRelativeToBbox(const UT_Vector3 &pt, const int &axis)
 	return SYSfit(pt[axis], bbox_min[axis], bbox_max[axis], 0, 1);
 }
 
-double
-lerp(double &a, double &b, float weight)
-{
-	return a + weight * (b - a);
-}
-
-
-UT_Vector3D
-lerp(UT_Vector3D &a, UT_Vector3D &b, float weight)
-{
-	double x,y,z;
-	x = lerp(a[0], b[0], weight);
-	y = lerp(a[1], b[1], weight);
-	z = lerp(a[2], b[2], weight);
-	return UT_Vector3D(x, y, z);
-}
 
 void
 PathDeform::computeBboxAxis(const int &axis, UT_Vector3 &pt0, UT_Vector3 &pt1)
@@ -256,7 +241,6 @@ PathDeform::cookMySop(OP_Context &context)
     GA_RWPageHandleV3 hndl_geo_n;
 	GA_RWPageHandleV3 hndl_geo_p = gdp->getP();
 	GA_RWAttributeRef aref_geo_n = gdp->findNormalAttribute(GA_ATTRIB_POINT);
-	GA_RWPageHandleV3 _tmp = gdp->addFloatTuple(GA_ATTRIB_POINT, "tmp", 3).getAttribute();
 	if (aref_geo_n.isValid())
         hndl_geo_n = aref_geo_n.getAttribute();
 
@@ -278,7 +262,6 @@ PathDeform::cookMySop(OP_Context &context)
 	object_axis_size *= stretch_mult;
 	float segment_length = arclen / curve_num_points;
 	float step = object_axis_size / segment_length; // how many cuve points in object length
-    float rad90 = SYSdegToRad(90);
 
     // Vector Attribs to reorient
     GA_AttributeRefMap aref_vecattribs((GA_Detail &)gdp);
@@ -308,7 +291,6 @@ PathDeform::cookMySop(OP_Context &context)
 	UT_Vector3D nextCurveBT, prevCurveBT, lerpCurveBT;
 	UT_Vector3D nextCurveUp, prevCurveUp, lerpCurveUp;
 	UT_Vector3  projection_point, projection_direction;
-    GA_Offset curve_offset;
     GA_Offset block_offset_start, block_offset_end;
 	GA_IndexMap curveIndexMap = curve_gdp->getIndexMap(GA_ATTRIB_POINT);
 	UT_Matrix3D curve_basis;
@@ -316,7 +298,6 @@ PathDeform::cookMySop(OP_Context &context)
 	{
 		hndl_geo_p.setPage(block_offset_start);
 		hndl_geo_n.setPage(block_offset_start);
-		_tmp.setPage(block_offset_start);
 		for (GA_Offset ptof = block_offset_start; ptof < block_offset_end; ptof++)
 		{
 			// Find point projection on object axis
@@ -333,11 +314,11 @@ PathDeform::cookMySop(OP_Context &context)
 
         	unsigned int next_curve_pointnum = SYSmin(SYSceil(u_position_on_curve), (float) curve_num_points - 1);
         	unsigned int prev_curve_pointnum = SYSmin(SYSfloor(u_position_on_curve), (float) curve_num_points - 1);
-        	float fraction = SYSfrac(u_position_on_curve);
+        	double fraction = SYSfrac(u_position_on_curve);
 
         	// Import curve attribs
         	// Previous point
-        	curve_offset = curveIndexMap.offsetFromIndex(next_curve_pointnum);
+        	GA_Offset curve_offset = curveIndexMap.offsetFromIndex(next_curve_pointnum);
         	nextCurveP = hndl_curve_p.get(curve_offset);
         	nextCurveT = hndl_curve_tang.get(curve_offset);
         	nextCurveBT = hndl_curve_btang.get(curve_offset);
@@ -351,13 +332,12 @@ PathDeform::cookMySop(OP_Context &context)
         	prevCurveUp = hndl_curve_up.get(curve_offset);
 
         	// Interpolated values
-        	lerpCurveP = lerp(nextCurveP, prevCurveP, 1 - fraction);
-        	lerpCurveT = lerp(nextCurveT, prevCurveT, 1 - fraction);
-        	lerpCurveBT = lerp(nextCurveBT, prevCurveBT, 1 - fraction);
-        	lerpCurveUp = lerp(nextCurveUp, prevCurveUp, 1 - fraction);
+        	lerpCurveP = SYSlerp<double>(nextCurveP, prevCurveP, 1 - fraction);
+        	lerpCurveT = SYSlerp<double>(nextCurveT, prevCurveT, 1 - fraction);
+        	lerpCurveBT = SYSlerp<double>(nextCurveBT, prevCurveBT, 1 - fraction);
+        	lerpCurveUp = SYSlerp<double>(nextCurveUp, prevCurveUp, 1 - fraction);
 
         	// Comstruct coordinate system
-
         	switch (axis)
         	{
         		case 0:
@@ -377,7 +357,6 @@ PathDeform::cookMySop(OP_Context &context)
         			break;
         	}
         	projection_direction *= curve_basis;
-        	_tmp.set(ptof, projection_direction);
         	if (use_width && hndl_curve_width.isValid())
         	{
         		double w1, w2;
@@ -385,7 +364,7 @@ PathDeform::cookMySop(OP_Context &context)
         	    w1 = hndl_curve_width.get(curve_offset);
         	    curve_offset = curveIndexMap.offsetFromIndex(prev_curve_pointnum);
         	    w2 = hndl_curve_width.get(curve_offset);
-        		projection_direction *= lerp(w1, w2, (1 - fraction));
+        		projection_direction *= SYSlerp(w1, w2, (1 - fraction));
         	}
         	lerpCurveP += projection_direction;
         	hndl_geo_p.set(ptof, lerpCurveP);
