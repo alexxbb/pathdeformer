@@ -30,19 +30,12 @@ protected:
 	float pointRelativeToBbox(const UT_Vector3 &pt, const int &axis);
 
 private:
-	GA_RWAttributeRef aref_curve_tang;
-	GA_RWAttributeRef aref_curve_btang;
-	GA_RWAttributeRef aref_curve_up;
-	GA_RWAttributeRef aref_curve_twist;
-	GA_RWAttributeRef aref_curve_width;
-
 	GA_RWHandleV3 hndl_curve_tang;
 	GA_RWHandleV3 hndl_curve_btang;
 	GA_RWHandleV3 hndl_curve_up;
 	GA_ROHandleV3 hndl_curve_p;
 	GA_ROHandleF hndl_curve_twist;
 	GA_ROHandleF hndl_curve_width;
-
 	void computeCurveAttributes(const GEO_Curve *curve_prim, fpreal time);
 	int PARM_USEUPVECTOR() {return evalInt("use_up_vector", 0, 0);}
 	int PARM_USETWIST() {return evalInt("use_curve_twist", 0, 0);}
