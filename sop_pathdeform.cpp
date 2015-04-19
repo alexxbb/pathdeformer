@@ -15,6 +15,8 @@
 #include <GA/GA_PrimitiveFamilyMask.h>
 #include <GA/GA_AttributeRefMapDestHandle.h>
 #include <GA/GA_Types.h>
+#include <GA/GA_PageIterator.h>
+#include <GA/GA_PageHandle.h>
 #include <OP/OP_OperatorTable.h>
 #include <GEO/GEO_Primitive.h>
 #include <GEO/GEO_PrimTypeCompat.h>
@@ -86,14 +88,6 @@ PathDeform::updateParmsFlags()
 }
 
 
-float
-PathDeform::pointRelativeToBbox(const UT_Vector3 &pt, const int &axis)
-{
-	return SYSfit(pt[axis], bbox_min[axis], bbox_max[axis], 0, 1);
-}
-
-
-
 void
 PathDeform::computeBboxAxis(const int &axis, UT_Vector3 &pt0, UT_Vector3 &pt1)
 {
@@ -133,7 +127,7 @@ PathDeform::computeCurveAttributes(const GEO_Curve *curve_prim, fpreal time)
 	if (PARM_USEUPVECTOR())
 		avg_normal.assign(PARM_UPX(time), PARM_UPY(time), PARM_UPZ(time));
 	else
-		((GU_Curve *)curve_prim->castTo())->curveNormal(avg_normal);
+        avg_normal = curve_prim->computeNormal();
 
 	avg_normal.normalize();
 	short int npts = curve_prim->getPointRange().getEntries();
@@ -182,197 +176,119 @@ PathDeform::computeCurveAttributes(const GEO_Curve *curve_prim, fpreal time)
 	}
 }
 
-class ThreadedDeform
+inline float
+pointRelativeToBbox(const UT_Vector3 &pt, const int &axis, const UT_Vector3 &bbox_min, const UT_Vector3 &bbox_max)
 {
-public:
-	ThreadedDeform(GA_RWAttributeRef &aref_geo_p,
-				   GA_RWAttributeRef &aref_geo_n,
-				   GA_RWHandleV3 &hndl_curve_tang,
-				   GA_RWHandleV3 &hndl_curve_btang,
-				   GA_RWHandleV3 &hndl_curve_up,
-				   GA_ROHandleV3 &hndl_curve_p,
-				   GA_ROHandleF &hndl_curve_twist,
-				   GA_ROHandleF &hndl_curve_width,
-				   GA_AttributeRefMap &aref_map,
-				   GA_IndexMap &curveIndexMap,
-				   int &use_width,
-				   int &stretch_tolen,
-				   int &deform_vattribs,
-				   int &axis,
-				   float &offset,
-				   float &step,
-				   unsigned int &curve_num_points,
-				   UT_Vector3 &bbox_min,
-				   UT_Vector3 &bbox_max,
-				   UT_Vector3 &axis_vector,
-				   UT_Vector3 &axis_pt0,
-				   UT_Vector3 &axis_pt1):
-					   aref_geo_p(aref_geo_p),
-					   aref_geo_n(aref_geo_n),
-					   hndl_curve_tang(hndl_curve_tang),
-					   hndl_curve_btang(hndl_curve_btang),
-					   hndl_curve_up(hndl_curve_up),
-					   hndl_curve_p(hndl_curve_p),
-					   hndl_curve_twist(hndl_curve_twist),
-					   hndl_curve_width(hndl_curve_width),
-					   curveIndexMap(curveIndexMap),
-					   aref_map(aref_map),
-					   use_width(use_width),
-					   stretch_tolen(stretch_tolen),
-					   deform_vattribs(deform_vattribs),
-					   axis(axis),
-					   offset(offset),
-					   step(step),
-					   curve_num_points(curve_num_points),
-					   bbox_min(bbox_min),
-					   bbox_max(bbox_max),
-					   axis_vector(axis_vector),
-					   axis_pt0(axis_pt0),
-					   axis_pt1(axis_pt1)
+	return SYSfit(pt[axis], bbox_min[axis], bbox_max[axis], 0, 1);
+}
+
+void
+ThreadedDeform::
+operator()(const GA_SplittableRange &sr) const
+{
+	UT_Vector3D nextCurveP, prevCurveP, lerpCurveP;
+	UT_Vector3D nextCurveT, prevCurveT, lerpCurveT;
+	UT_Vector3D nextCurveBT, prevCurveBT, lerpCurveBT;
+	UT_Vector3D nextCurveUp, prevCurveUp, lerpCurveUp;
+	UT_Vector3  projection_point, projection_direction;
+	UT_Vector3 bbox_min = bbox.minvec();
+	UT_Vector3 bbox_max = bbox.maxvec();
+	UT_Matrix3D curve_basis;
+	GA_RWPageHandleV3 hndl_geo_p(attr_geo_p);
+	GA_RWPageHandleV3 hndl_geo_n(attr_geo_n);
+
+	for (GA_PageIterator pit = sr.beginPages(); !pit.atEnd(); ++pit)
 	{
-
-	};
-	~ThreadedDeform(){};
-
-	float
-	pointRelativeToBbox(const UT_Vector3 &pt, const int &axis) const
-	{
-		return SYSfit(pt[axis], bbox_min[axis], bbox_max[axis], 0, 1);
-	}
-
-	void operator()(const GA_SplittableRange &sr) const
-	{
-
-		UT_Vector3D nextCurveP, prevCurveP, lerpCurveP;
-		UT_Vector3D nextCurveT, prevCurveT, lerpCurveT;
-		UT_Vector3D nextCurveBT, prevCurveBT, lerpCurveBT;
-		UT_Vector3D nextCurveUp, prevCurveUp, lerpCurveUp;
-		UT_Vector3  projection_point, projection_direction;
-		UT_Matrix3D curve_basis;
-		GA_RWPageHandleV3 hndl_geo_n(aref_geo_n.getAttribute());
-		GA_RWPageHandleV3 hndl_geo_p(aref_geo_p.getAttribute());
-
-		for (GA_PageIterator pit = sr.beginPages(); !pit.atEnd(); ++pit)
+		GA_Offset block_offset_start, block_offset_end;
+		for(GA_Iterator it(pit.begin()); it.blockAdvance(block_offset_start, block_offset_end);)
 		{
-            GA_Offset block_offset_start, block_offset_end;
-			for(GA_Iterator it(pit.begin()); it.blockAdvance(block_offset_start, block_offset_end);)
+			hndl_geo_p.setPage(block_offset_start);
+			hndl_geo_n.setPage(block_offset_start);
+			for (GA_Offset ptof = block_offset_start; ptof < block_offset_end; ++ptof)
 			{
-				hndl_geo_p.setPage(block_offset_start);
-				hndl_geo_n.setPage(block_offset_start);
-				for (GA_Offset ptof = block_offset_start; ptof < block_offset_end; ++ptof)
+				// Find point projection on object axis
+				UT_Vector3 t0 = hndl_geo_p.get(ptof) - axis_pt0;
+				float t0_len = t0.length();
+				t0.normalize();
+				float angle = t0.dot(axis_vector);
+				float projection = angle * t0_len;
+				projection_point = axis_pt0 + axis_vector * projection;
+				projection_direction = hndl_geo_p.get(ptof) - projection_point;
+				float bbox_relpos = pointRelativeToBbox(hndl_geo_p.get(ptof), axis, bbox_min, bbox_max);
+				float u_position_on_curve = bbox_relpos * step;
+				u_position_on_curve += offset * (curve_num_points - 1);
+
+				unsigned int next_curve_pointnum = SYSmin(SYSceil(u_position_on_curve), (float) curve_num_points - 1);
+				unsigned int prev_curve_pointnum = SYSmin(SYSfloor(u_position_on_curve), (float) curve_num_points - 1);
+				double fraction = SYSfrac(u_position_on_curve);
+
+				// Import curve attribs
+				// Previous point
+				GA_Offset curve_offset = curveIndexMap.offsetFromIndex(next_curve_pointnum);
+				nextCurveP = hndl_curve_p.get(curve_offset);
+				nextCurveT = hndl_curve_tang.get(curve_offset);
+				nextCurveBT = hndl_curve_btang.get(curve_offset);
+				nextCurveUp = hndl_curve_up.get(curve_offset);
+
+				// Next point
+				curve_offset = curveIndexMap.offsetFromIndex(prev_curve_pointnum);
+				prevCurveP = hndl_curve_p.get(curve_offset);
+				prevCurveT = hndl_curve_tang.get(curve_offset);
+				prevCurveBT = hndl_curve_btang.get(curve_offset);
+				prevCurveUp = hndl_curve_up.get(curve_offset);
+
+				// Interpolated values
+				lerpCurveP = SYSlerp<double>(nextCurveP, prevCurveP, 1 - fraction);
+				lerpCurveT = SYSlerp<double>(nextCurveT, prevCurveT, 1 - fraction);
+				lerpCurveBT = SYSlerp<double>(nextCurveBT, prevCurveBT, 1 - fraction);
+				lerpCurveUp = SYSlerp<double>(nextCurveUp, prevCurveUp, 1 - fraction);
+
+				// Comstruct coordinate system
+				switch (axis)
 				{
-					// Find point projection on object axis
-					UT_Vector3 t0 = hndl_geo_p.get(ptof) - axis_pt0;
-					float t0_len = t0.length();
-					t0.normalize();
-					float angle = t0.dot(axis_vector);
-					float projection = angle * t0_len;
-					projection_point = axis_pt0 + axis_vector * projection;
-					projection_direction = hndl_geo_p.get(ptof) - projection_point;
-					float bbox_relpos = pointRelativeToBbox(hndl_geo_p.get(ptof), axis);
-					float u_position_on_curve = bbox_relpos * step;
-					u_position_on_curve += offset * (curve_num_points - 1);
-
-					unsigned int next_curve_pointnum = SYSmin(SYSceil(u_position_on_curve), (float) curve_num_points - 1);
-					unsigned int prev_curve_pointnum = SYSmin(SYSfloor(u_position_on_curve), (float) curve_num_points - 1);
-					double fraction = SYSfrac(u_position_on_curve);
-
-					// Import curve attribs
-					// Previous point
-					GA_Offset curve_offset = curveIndexMap.offsetFromIndex(next_curve_pointnum);
-					nextCurveP = hndl_curve_p.get(curve_offset);
-					nextCurveT = hndl_curve_tang.get(curve_offset);
-					nextCurveBT = hndl_curve_btang.get(curve_offset);
-					nextCurveUp = hndl_curve_up.get(curve_offset);
-
-					// Next point
+					case 0:
+						curve_basis = UT_Matrix3D(lerpCurveT[0], lerpCurveT[1], lerpCurveT[2],
+										lerpCurveUp[0], lerpCurveUp[1], lerpCurveUp[2],
+										-lerpCurveBT[0], -lerpCurveBT[1], -lerpCurveBT[2]);
+						break;
+					case 1:
+						curve_basis = UT_Matrix3D(lerpCurveUp[0], lerpCurveUp[1], lerpCurveUp[2],
+										lerpCurveT[0], lerpCurveT[1], lerpCurveT[2],
+										lerpCurveBT[0], lerpCurveBT[1], lerpCurveBT[2]);
+						break;
+					case 2:
+						curve_basis = UT_Matrix3D(lerpCurveBT[0], lerpCurveBT[1], lerpCurveBT[2],
+										lerpCurveUp[0], lerpCurveUp[1], lerpCurveUp[2],
+										-lerpCurveT[0], -lerpCurveT[1], -lerpCurveT[2]);
+						break;
+				}
+				projection_direction *= curve_basis;
+				if (use_width && hndl_curve_width.isValid())
+				{
+					double w1, w2;
+					curve_offset = curveIndexMap.offsetFromIndex(next_curve_pointnum);
+					w1 = hndl_curve_width.get(curve_offset);
 					curve_offset = curveIndexMap.offsetFromIndex(prev_curve_pointnum);
-					prevCurveP = hndl_curve_p.get(curve_offset);
-					prevCurveT = hndl_curve_tang.get(curve_offset);
-					prevCurveBT = hndl_curve_btang.get(curve_offset);
-					prevCurveUp = hndl_curve_up.get(curve_offset);
+					w2 = hndl_curve_width.get(curve_offset);
+					projection_direction *= SYSlerp(w1, w2, (1 - fraction));
+				}
+				lerpCurveP += projection_direction;
+				hndl_geo_p.set(ptof, lerpCurveP);
 
-					// Interpolated values
-					lerpCurveP = SYSlerp<double>(nextCurveP, prevCurveP, 1 - fraction);
-					lerpCurveT = SYSlerp<double>(nextCurveT, prevCurveT, 1 - fraction);
-					lerpCurveBT = SYSlerp<double>(nextCurveBT, prevCurveBT, 1 - fraction);
-					lerpCurveUp = SYSlerp<double>(nextCurveUp, prevCurveUp, 1 - fraction);
-
-					// Comstruct coordinate system
-					switch (axis)
+				if (deform_vattribs)
+				{
+					if (aref_map.entries() > 0)
 					{
-						case 0:
-							curve_basis = UT_Matrix3D(lerpCurveT[0], lerpCurveT[1], lerpCurveT[2],
-											lerpCurveUp[0], lerpCurveUp[1], lerpCurveUp[2],
-											-lerpCurveBT[0], -lerpCurveBT[1], -lerpCurveBT[2]);
-							break;
-						case 1:
-							curve_basis = UT_Matrix3D(lerpCurveUp[0], lerpCurveUp[1], lerpCurveUp[2],
-											lerpCurveT[0], lerpCurveT[1], lerpCurveT[2],
-											lerpCurveBT[0], lerpCurveBT[1], lerpCurveBT[2]);
-							break;
-						case 2:
-							curve_basis = UT_Matrix3D(lerpCurveBT[0], lerpCurveBT[1], lerpCurveBT[2],
-											lerpCurveUp[0], lerpCurveUp[1], lerpCurveUp[2],
-											-lerpCurveT[0], -lerpCurveT[1], -lerpCurveT[2]);
-							break;
-					}
-					projection_direction *= curve_basis;
-					if (use_width && hndl_curve_width.isValid())
-					{
-						double w1, w2;
-						curve_offset = curveIndexMap.offsetFromIndex(next_curve_pointnum);
-						w1 = hndl_curve_width.get(curve_offset);
-						curve_offset = curveIndexMap.offsetFromIndex(prev_curve_pointnum);
-						w2 = hndl_curve_width.get(curve_offset);
-						projection_direction *= SYSlerp(w1, w2, (1 - fraction));
-					}
-					lerpCurveP += projection_direction;
-					hndl_geo_p.set(ptof, lerpCurveP);
-
-					if (deform_vattribs)
-					{
-						if (aref_map.entries() > 0)
-						{
-							UT_Matrix4D m,im;
-							m = curve_basis;
-							m.invert(im);
-							aref_map.transform(m, im, GA_ATTRIB_POINT, ptof);
-						}
+						UT_Matrix4D m,im;
+						m = curve_basis;
+						m.invert(im);
+						aref_map.transform(m, im, GA_ATTRIB_POINT, ptof);
 					}
 				}
-
+			}
 		}
-
 	}
 };
-private:
-	GA_RWAttributeRef aref_geo_p;
-	GA_RWAttributeRef aref_geo_n;
-	GA_RWHandleV3 hndl_curve_tang;
-	GA_RWHandleV3 hndl_curve_btang;
-	GA_RWHandleV3 hndl_curve_up;
-	GA_ROHandleV3 hndl_curve_p;
-	GA_ROHandleF hndl_curve_twist;
-	GA_ROHandleF hndl_curve_width;
-	GA_AttributeRefMap aref_map;
-	GA_IndexMap curveIndexMap;
-	UT_Vector3 bbox_min, bbox_max;
-
-	int use_width;
-	int stretch_tolen;
-	int deform_vattribs;
-	int axis;
-	float offset;
-	float step;
-	unsigned int curve_num_points;
-
-	UT_Vector3 axis_vector;
-	UT_Vector3 axis_pt0;
-	UT_Vector3 axis_pt1;
-
-};
-
 
 
 OP_ERROR
@@ -413,23 +329,16 @@ PathDeform::cookMySop(OP_Context &context)
     int deform_vattribs = PARM_DEFORM_VECTORS();
     int axis = PARM_AXIS();
     float offset = PARM_OFFSET(time);
-	// Geometry attributes
-	GA_RWAttributeRef aref_curve_tang = curve_gdp->addFloatTuple(GA_ATTRIB_POINT, "tang", 3);
-	GA_RWAttributeRef aref_curve_btang = curve_gdp->addFloatTuple(GA_ATTRIB_POINT, "btang", 3);
-	GA_RWAttributeRef aref_curve_up = curve_gdp->addFloatTuple(GA_ATTRIB_POINT, "up", 3);
-	GA_RWAttributeRef aref_geo_n = gdp->findNormalAttribute(GA_ATTRIB_POINT);
-	GA_RWAttributeRef aref_geo_p = gdp->findFloatTuple(GA_ATTRIB_POINT,  "P", 3);
 
-	hndl_curve_tang = aref_curve_tang.getAttribute();
-	hndl_curve_btang = aref_curve_btang.getAttribute();
-	hndl_curve_up = aref_curve_up.getAttribute();
+	// Geometry attributes
+	hndl_curve_tang  = curve_gdp->addFloatTuple(GA_ATTRIB_POINT, "tang", 3);
+	hndl_curve_btang = curve_gdp->addFloatTuple(GA_ATTRIB_POINT, "btang", 3);
+	hndl_curve_up = curve_gdp->addFloatTuple(GA_ATTRIB_POINT, "up", 3);
 	hndl_curve_p = curve_gdp->getP();
-	GA_RWPageHandleV3 hndl_geo_p(gdp->getP());
-	GA_RWPageHandleV3 hndl_geo_n;
-	if (aref_geo_n.isValid())
-		GA_RWPageHandleV3 hndl_geo_n(aref_geo_n.getAttribute());
-	hndl_curve_twist = curve_gdp->findPointAttribute("twist").getAttribute();
-	hndl_curve_width = curve_gdp->findPointAttribute("width").getAttribute();
+	hndl_curve_twist = curve_gdp->findPointAttribute("twist");
+	hndl_curve_width = curve_gdp->findPointAttribute("width");
+	GA_Attribute *attr_geo_n = gdp->findNormalAttribute(GA_ATTRIB_POINT);
+	GA_Attribute *attr_geo_p = gdp->getP();
 
 	GEO_Curve *geocurve_prim = static_cast<GEO_Curve*>(curve_geo_prim);
 	computeCurveAttributes(geocurve_prim, time);
@@ -438,10 +347,10 @@ PathDeform::cookMySop(OP_Context &context)
 
 	// Main
 	UT_BoundingBox bbox;
-	UT_Vector3 axis_pt0, axis_pt1;
 	gdp->getBBox(&bbox);
 	bbox_min = bbox.minvec();
 	bbox_max = bbox.maxvec();
+	UT_Vector3 axis_pt0, axis_pt1;
 	computeBboxAxis(axis, axis_pt0, axis_pt1);
 	UT_Vector3 axis_vector = axis_pt1 - axis_pt0;
 	axis_vector.normalize();
@@ -481,10 +390,10 @@ PathDeform::cookMySop(OP_Context &context)
 
 	// Deformation.
     const GA_SplittableRange sr(gdp->getPointRange());
-	GA_IndexMap curveIndexMap = curve_gdp->getIndexMap(GA_ATTRIB_POINT);
+	const GA_IndexMap &curveIndexMap = curve_gdp->getPointMap();
 	ThreadedDeform td(
-			aref_geo_p,
-			aref_geo_n,
+			attr_geo_p,
+			attr_geo_n,
 			hndl_curve_tang,
 			hndl_curve_btang,
 			hndl_curve_up,
@@ -500,16 +409,24 @@ PathDeform::cookMySop(OP_Context &context)
 			offset,
 			step,
 			curve_num_points,
-			bbox_min,
-			bbox_max,
+			bbox,
 			axis_vector,
 			axis_pt0,
 			axis_pt1);
 
 	UTparallelFor(sr, td);
-    if (recompute_n && hndl_geo_n.isValid())
-    	gdp->normal();
+	//UTserialFor(sr, td);
+	if (recompute_n)
+	{
+		if (attr_geo_n)
+			gdp->normal();
+	}
+	//gdp->clearAndDestroy();
+	//gdp->merge(*curve_gdp);
+
+
 	unlockInputs();
+	delete curve_gdp;
 	return error();
 }
 

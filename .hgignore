@@ -2,7 +2,11 @@ syntax:glob
 *.o
 *.lib
 *.so
+*.exp
 *backup*
 *.settings
 *.project
 *.cproject
+*.sdf
+x64\*
+Release\*
