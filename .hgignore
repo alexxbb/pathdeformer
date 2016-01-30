@@ -10,6 +10,7 @@ syntax:glob
 *.sdf
 *.filters
 *.sln
+*.suo
 *.vcxproj
 *.user
 *.orig
