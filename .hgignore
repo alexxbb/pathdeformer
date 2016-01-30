@@ -8,5 +8,8 @@ syntax:glob
 *.project
 *.cproject
 *.sdf
+*.filters
+*.vcxproj
+*.orig
 x64\*
 Release\*
