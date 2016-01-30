@@ -9,7 +9,9 @@ syntax:glob
 *.cproject
 *.sdf
 *.filters
+*.sln
 *.vcxproj
+*.user
 *.orig
 x64\*
 Release\*
