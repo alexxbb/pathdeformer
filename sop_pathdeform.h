@@ -50,6 +50,8 @@ private:
 	float PARM_STRETCH(fpreal t) {return evalFloat("stretch",  0, t); }
     void PARM_REORIENT_ATTRIBS(UT_String &str) {evalString(str, "vattribs", 0, 0);}
     int PARM_DEFORM_VECTORS() {return evalInt("deform_vattribs", 0, 0);}
+    int PARM_ADD_BASIS_ATTR() {return evalInt("add_basis_attribs", 0, 0);}
+
     int PARM_COMPUTE_N() {return evalInt("recompute_n", 0, 0);}
 
     UT_Vector3 bbox_min, bbox_max;
@@ -61,6 +63,9 @@ class ThreadedDeform {
 public:
 	ThreadedDeform(GA_Attribute *attr_geo_p,
 	GA_Attribute *attr_geo_n,
+	GA_Attribute *attr_direction,
+	GA_Attribute *attr_normal,
+	GA_Attribute *attr_up,
 	GA_RWHandleV3 &hndl_curve_tang,
 	GA_RWHandleV3 &hndl_curve_btang,
 	GA_RWHandleV3 &hndl_curve_up,
@@ -83,6 +88,9 @@ public:
 
 	attr_geo_p(attr_geo_p),
 		attr_geo_n(attr_geo_n),
+		attr_direction(attr_direction),
+		attr_normal(attr_normal),
+		attr_up(attr_up),
 		hndl_curve_tang(hndl_curve_tang),
 		hndl_curve_btang(hndl_curve_btang),
 		hndl_curve_up(hndl_curve_up),
@@ -112,6 +120,9 @@ public:
 	private:
 		GA_Attribute *attr_geo_p;
 		GA_Attribute *attr_geo_n;
+		GA_Attribute *attr_direction;
+		GA_Attribute *attr_normal;
+		GA_Attribute *attr_up;
 		GA_RWHandleV3 hndl_curve_tang;
 		GA_RWHandleV3 hndl_curve_btang;
 		GA_RWHandleV3 hndl_curve_up;

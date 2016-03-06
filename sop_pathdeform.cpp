@@ -55,6 +55,7 @@ static PRM_Name stretch_tolen("stretch_to_len", "Stretch To Length");
 static PRM_Name vecAttribs("vattribs", "Vector Attributes");
 static PRM_Name deformVattribs("deform_vattribs", "Deform Vector Attributes");
 static PRM_Name recompute_normals("recompute_n", "Recompute Point Normals");
+static PRM_Name addBasisAttr("add_basis_attribs", "Add Basis Attribs To Points");
 
 static PRM_Range stretchRange(PRM_RANGE_RESTRICTED, -1, PRM_RANGE_UI, 2);
 
@@ -67,6 +68,7 @@ PathDeform::parmsTemplatesList[] =
 	PRM_Template(PRM_TOGGLE_E, 1, &useCurveTwist, PRMoneDefaults),
 	PRM_Template(PRM_TOGGLE_E, 1, &useCurveWidth, PRMoneDefaults),
 	PRM_Template(PRM_TOGGLE_E, 1, &recompute_normals, PRMzeroDefaults),
+	PRM_Template(PRM_TOGGLE_E, 1, &addBasisAttr, PRMzeroDefaults),
 	PRM_Template(PRM_TOGGLE_E, 1, &deformVattribs, PRMzeroDefaults),
     PRM_Template(PRM_STRING, 1, &vecAttribs, 0),
     PRM_Template(PRM_TOGGLE_E, 1, &stretch_tolen, PRMzeroDefaults),
@@ -196,6 +198,9 @@ operator()(const GA_SplittableRange &sr) const
 	UT_Matrix3D curve_basis;
 	GA_RWPageHandleV3 hndl_geo_p(attr_geo_p);
 	GA_RWPageHandleV3 hndl_geo_n(attr_geo_n);
+	GA_RWPageHandleV3 hndl_direction(attr_direction);
+	GA_RWPageHandleV3 hndl_normal(attr_normal);
+	GA_RWPageHandleV3 hndl_up(attr_up);
 
 	for (GA_PageIterator pit = sr.beginPages(); !pit.atEnd(); ++pit)
 	{
@@ -204,6 +209,9 @@ operator()(const GA_SplittableRange &sr) const
 		{
 			hndl_geo_p.setPage(block_offset_start);
 			hndl_geo_n.setPage(block_offset_start);
+			hndl_direction.setPage(block_offset_start);
+			hndl_normal.setPage(block_offset_start);
+			hndl_up.setPage(block_offset_start);
 			for (GA_Offset ptof = block_offset_start; ptof < block_offset_end; ++ptof)
 			{
 				// Find point projection on object axis
@@ -263,6 +271,13 @@ operator()(const GA_SplittableRange &sr) const
 						break;
 				}
 				projection_direction *= curve_basis;
+				
+				if (hndl_direction.isValid() && hndl_normal.isValid() && hndl_up.isValid()) {
+					hndl_direction.set(ptof, lerpCurveT);
+					hndl_normal.set(ptof, lerpCurveBT);
+					hndl_up.set(ptof, lerpCurveUp);
+				}
+				
 				if (use_width && hndl_curve_width.isValid())
 				{
 					double w1, w2;
@@ -274,6 +289,7 @@ operator()(const GA_SplittableRange &sr) const
 				}
 				lerpCurveP += projection_direction;
 				hndl_geo_p.set(ptof, lerpCurveP);
+				
 
 				if (deform_vattribs)
 				{
@@ -340,6 +356,15 @@ PathDeform::cookMySop(OP_Context &context)
 	GA_Attribute *attr_geo_n = gdp->findNormalAttribute(GA_ATTRIB_POINT);
 	GA_Attribute *attr_geo_p = gdp->getP();
 
+	GA_Attribute *attr_direction = nullptr;
+	GA_Attribute *attr_normal = nullptr;
+	GA_Attribute *attr_up = nullptr;
+	if (PARM_ADD_BASIS_ATTR() != 0) {
+		attr_direction = gdp->addFloatTuple(GA_ATTRIB_POINT, "dir", 3);
+		attr_normal = gdp->addFloatTuple(GA_ATTRIB_POINT, "normal", 3);
+		attr_up = gdp->addFloatTuple(GA_ATTRIB_POINT, "up", 3);
+	}
+
 	GEO_Curve *geocurve_prim = static_cast<GEO_Curve*>(curve_geo_prim);
 	computeCurveAttributes(geocurve_prim, time);
 	float arclen = geocurve_prim->calcPerimeter();
@@ -394,6 +419,9 @@ PathDeform::cookMySop(OP_Context &context)
 	ThreadedDeform td(
 			attr_geo_p,
 			attr_geo_n,
+			attr_direction,
+			attr_normal,
+			attr_up,
 			hndl_curve_tang,
 			hndl_curve_btang,
 			hndl_curve_up,

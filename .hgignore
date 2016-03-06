@@ -14,5 +14,6 @@ syntax:glob
 *.vcxproj
 *.user
 *.orig
+*.db
 x64\*
 Release\*
