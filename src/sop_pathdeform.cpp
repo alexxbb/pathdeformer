@@ -33,7 +33,7 @@
 
 using namespace std;
 
-const char *inputLabels[] = {"Deform geometry", "Input curve"};
+const char *inputLabels[] = {"Deform geometry", "Input curve", '\0'};
 
 OP_Node *PathDeform::MyConstructor(OP_Network *net, const char *name, OP_Operator *op)
 {
